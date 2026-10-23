@@ -1,0 +1,5 @@
+aiogram>=3.4
+aiohttp
+aiosqlite
+apscheduler>=3.10,<4
+beautifulsoup4
