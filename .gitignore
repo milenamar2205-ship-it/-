@@ -1,0 +1,7 @@
+@"
+# local files
+.env
+venv/
+bot.db
+__pycache__/
+"@ | Out-File -Encoding utf8 .gitignore
