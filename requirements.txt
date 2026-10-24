@@ -1,5 +1,7 @@
 aiogram>=3.4
 aiohttp
+aiohttp-socks
 aiosqlite
 apscheduler>=3.10,<4
 beautifulsoup4
+tzdata

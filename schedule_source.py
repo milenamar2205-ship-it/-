@@ -33,6 +33,9 @@ CACHE_TTL = 120  # секунд
 
 
 async def _fetch_html(group: str) -> str:
+    """POST-запрос к сайту. Bitrix требует CSRF-токен: первый запрос возвращает
+    ошибку invalid_csrf вместе с токеном, затем повторяем запрос с ним в заголовке
+    (в той же сессии, чтобы cookie сохранились)."""
     form = {
         "search_params[SEARCH]": group,
         "search_params[FILTER]": "GROUPS",
@@ -42,12 +45,27 @@ async def _fetch_html(group: str) -> str:
     }
     timeout = aiohttp.ClientTimeout(total=30)
     async with aiohttp.ClientSession(headers=HEADERS, timeout=timeout) as s:
-        async with s.post(URL, params=PARAMS, data=form) as r:
-            r.raise_for_status()
-            payload = await r.json(content_type=None)
-    if payload.get("status") != "success":
-        raise RuntimeError(f"Сайт вернул ошибку: {payload.get('errors')}")
-    return payload["data"]["html"]
+        csrf = None
+        for _ in range(3):
+            headers = {"X-Bitrix-Csrf-Token": csrf} if csrf else {}
+            async with s.post(URL, params=PARAMS, data=form, headers=headers) as r:
+                r.raise_for_status()
+                payload = await r.json(content_type=None)
+
+            if payload.get("status") == "success":
+                return payload["data"]["html"]
+
+            errors = payload.get("errors") or []
+            new_csrf = next(
+                (e.get("customData", {}).get("csrf")
+                 for e in errors if e.get("code") == "invalid_csrf"),
+                None,
+            )
+            if new_csrf and new_csrf != csrf:
+                csrf = new_csrf  # повторяем запрос с токеном
+                continue
+            raise RuntimeError(f"Сайт вернул ошибку: {errors}")
+    raise RuntimeError("Не удалось пройти проверку CSRF на сайте")
 
 
 def parse_lessons(html: str) -> list[dict]:
@@ -82,7 +100,9 @@ def parse_lessons(html: str) -> list[dict]:
             room = next((x for x in rest if "/" in x), "")
             teacher = next((x for x in rest if x != room and re.search(r"[А-ЯЁ]\.", x)), "")
 
+            pm = re.search(r"(\d+)\s*пара", dn.get_text(" "))
             out.append({
+                "pair": int(pm.group(1)) if pm else None,
                 "date": d.isoformat(),
                 "start": tm.group(1).zfill(5),
                 "end": tm.group(2).zfill(5),
